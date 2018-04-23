@@ -1,4 +1,5 @@
-#-*-coding:utf-8-*-
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import cPickle
 from RNN import GRU
 import numpy as np
@@ -211,6 +212,7 @@ def load_params(params,filename):
 def train(datasets, U,
           n_epochs=5, batch_size=20, max_l=50, hidden_size=200, word_embedding_size=200,
           session_hidden_size=50, session_input_size=50, model_name='SMN_last.bin'):
+    # 设置hiddensize，lsize，rsize，初始化，定义符号化编程的步骤
     hiddensize = hidden_size
     U = U.astype(dtype=theano.config.floatX)
     rng = np.random.RandomState(3435)
@@ -228,12 +230,19 @@ def train(datasets, U,
     y = T.ivector('y')
     Words = theano.shared(value=U, name="Words")
 
+    """
+    第一层GRU的输入，llayer0_input和rlayer0_input
+    llayer0_input是多轮对话构成的词级的向量，list类型，len=10，每一条是(200,50,200)的矩阵；
+    rlayer0_input是答句构成的词级的向量，(200,50,200)的矩阵
+    """
     llayer0_input = []
     for i in range(max_turn):
         llayer0_input.append(Words[T.cast(lx[i].flatten(),dtype="int32")]
                              .reshape((lx[i].shape[0], lx[i].shape[1], Words.shape[1])))
 
     rlayer0_input = Words[T.cast(rx.flatten(), dtype="int32")].reshape((rx.shape[0], rx.shape[1], Words.shape[1]))
+
+    # 从datasets中获取训练集，验证集和测试集
     train_set, dev_set, test_set = datasets[0], datasets[1], datasets[2]
 
     train_set_lx = []
@@ -241,6 +250,10 @@ def train(datasets, U,
     q_embedding = []
     offset = 2 * lsize
 
+    """
+    划分训练集的lx和rx，即train_set_lx，train_set_rx
+    划分lxmask，rxmask，sessionmask和y
+    """
     for i in range(max_turn):
         print(offset*i, offset*i + lsize)
         train_set_lx.append(theano.shared(np.asarray(train_set[:, offset*i:offset*i + lsize]
@@ -258,6 +271,9 @@ def train(datasets, U,
 
     val_set_lx = []
     val_set_lx_mask = []
+    """
+    验证集同训练集
+    """
     for i in range(max_turn):
         val_set_lx.append(theano.shared(np.asarray(dev_set[:, offset*i:offset*i + lsize]
                                                    , dtype=theano.config.floatX), borrow=True))
@@ -272,6 +288,9 @@ def train(datasets, U,
                                                     , dtype=theano.config.floatX), borrow=True)
     val_set_y =theano.shared(np.asarray(dev_set[:, -1], dtype="int32"), borrow=True)
 
+    """
+    构造训练集字典输入
+    """
     dic = {}
     for i in range(max_turn):
         dic[lx[i]] = train_set_lx[i][index*batch_size:(index+1)*batch_size]
@@ -281,6 +300,9 @@ def train(datasets, U,
     dic[rxmask] = train_set_rx_mask[index*batch_size:(index+1)*batch_size]
     dic[y] = train_set_y[index*batch_size:(index+1)*batch_size]
 
+    """
+    构造验证集字典输入
+    """
     val_dic = {}
     for i in range(max_turn):
         val_dic[lx[i]] = val_set_lx[i][index*batch_size:(index+1)*batch_size]
@@ -290,6 +312,11 @@ def train(datasets, U,
     val_dic[rxmask] = val_set_rx_mask[index*batch_size:(index+1)*batch_size]
     val_dic[y] = val_set_y[index*batch_size:(index+1)*batch_size]
 
+    """
+    第一次GRU，q_embedding和r_embedding是输出的结果
+    q_embedding是多轮对话构成的句子级的向量，list类型，len=10，每一条是(200,50,200)的矩阵；
+    rlayer0_input是答句构成的句子级的向量，(200,50,200)的矩阵
+    """
     sentence2vec = GRU(n_in=word_embedding_size, n_hidden=hiddensize, n_out=hiddensize)
 
     for i in range(max_turn):
@@ -298,16 +325,30 @@ def train(datasets, U,
 
     pooling_layer = ConvSim(rng, max_l, session_input_size, hidden_size=hiddensize)
 
+    """
+    卷积，输入是llayer0_input和rlayer0_input，q_embedding和r_embedding
+    过程是llayer0_input中的每一条数据和rlayer0_input做卷积
+    q_embedding中的每一条数据和r_embedding做卷积，合并结果
+    输出是poolingoutput，list类型，len=10，每一条是(200,50)的矩阵；
+    """
     poolingoutput = []
 
     for i in range(max_turn):
         poolingoutput.append(pooling_layer(llayer0_input[i], rlayer0_input,
                                            q_embedding[i], r_embedding))
 
+    """
+    第二次GRU，输入是poolingoutput
+    输出是res，(200,50)的矩阵，用一个50维的向量表示一个session
+    """
     session2vec = GRU(n_in=session_input_size, n_hidden=session_hidden_size, n_out=session_hidden_size)
 
     res = session2vec(T.stack(poolingoutput, 1), sessionmask)
 
+    """
+    逻辑回归分类：输入是res，标签是y
+    损失是negative_log_likelihood
+    """
     classifier = LogisticRegression(res, session_hidden_size, 2, rng)
 
     cost = classifier.negative_log_likelihood(y)
@@ -322,16 +363,22 @@ def train(datasets, U,
 
     grad_updates = opt.Adam(cost=cost, params=params, lr=0.001)
 
+    # 训练模型的定义
     train_model = theano.function([index], cost, updates=grad_updates, givens=dic, on_unused_input='ignore')
 
+    # 验证模型的定义
     val_model = theano.function([index], [cost, error], givens=val_dic, on_unused_input='ignore')
     best_dev = 1.
 
     n_train_batches = datasets[0].shape[0]/batch_size
 
+    """
+    开始灌数据输入，n_epochs是训练次数
+    """
     for i in xrange(n_epochs):
         cost = 0
         total = 0.
+        # 训练的代码
         for minibatch_index in np.random.permutation(range(n_train_batches)):
             batch_cost = train_model(minibatch_index)
             print "minibatch_index"
@@ -343,6 +390,7 @@ def train(datasets, U,
         cost = cost / n_train_batches
         print "echo %d loss %f" % (i, cost)
 
+        # 验证的代码
         cost = 0
         errors = 0
         j = 0
@@ -356,13 +404,13 @@ def train(datasets, U,
         if cost < best_dev:
             best_dev = cost
             save_params(params,model_name)
-        print  "echo %d dev_loss %f" % (i, cost)
-        print  "echo %d dev_accuracy %f" % (i, 1 - errors)
+        print "echo %d dev_loss %f" % (i, cost)
+        print "echo %d dev_accuracy %f" % (i, 1 - errors)
 
 def save_params(params,filename):
     num_params = [p.get_value() for p in params]
-    f = open(filename,'wb')
-    cPickle.dump(num_params,f)
+    f = open(filename, 'wb')
+    cPickle.dump(num_params, f)
 
 def get_session_mask(sents):
     session_mask = [0.] * max_turn
@@ -381,7 +429,7 @@ def make_data(revs, word_idx_map, max_l=50, filter_h=3, val_test_splits=[2,3],va
     """
     Transforms sentences into a 2-d matrix.
     """
-    
+    # validation_num为验证集的大小
     train, val, test = [], [], []
     for rev in revs:
         sent = get_idx_from_sent_msg(rev["m"], word_idx_map, max_l, True)
