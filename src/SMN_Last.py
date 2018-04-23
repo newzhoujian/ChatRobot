@@ -1,3 +1,4 @@
+#-*-coding:utf-8-*-
 import cPickle
 from RNN import GRU
 import numpy as np
@@ -380,6 +381,7 @@ def make_data(revs, word_idx_map, max_l=50, filter_h=3, val_test_splits=[2,3],va
     """
     Transforms sentences into a 2-d matrix.
     """
+    
     train, val, test = [], [], []
     for rev in revs:
         sent = get_idx_from_sent_msg(rev["m"], word_idx_map, max_l, True)
@@ -401,10 +403,11 @@ def make_data(revs, word_idx_map, max_l=50, filter_h=3, val_test_splits=[2,3],va
 
 
 if __name__=="__main__":
-    train_flag = True
-    max_word_per_utterence = 50
-    dataset = r"../processeddata/ubuntu_data_temp.mul.train"
+    train_flag = True  # 控制当前任务是训练还是测试，train_flag = True的时候做训练
+    max_word_per_utterence = 50  # 一句话中最大的单词数不超过50个
+    dataset = r"../processeddata/ubuntu_data_temp.mul.train"  # 训练集的数据库
 
+    # 获取dataset中的数据
     x = cPickle.load(open(dataset, "rb"))
     revs, wordvecs, max_l = x[0], x[1], x[2]
 
@@ -412,9 +415,10 @@ if __name__=="__main__":
         x = cPickle.load(open(r"ubuntu_data_temp.mul.test", "rb"))
         revs, wordvecs2, max_l2 = x[0], x[1], x[2]
 
+    # 划分了训练集、验证集、测试集
     datasets = make_data(revs, wordvecs.word_idx_map, max_l=max_word_per_utterence)
 
-    if train_flag:
+    if train_flag:  # batchsize设置为200，hidden_size和word_embedding_size设置为200
         train(datasets, wordvecs.W, batch_size=200, max_l=max_word_per_utterence
               , hidden_size=200, word_embedding_size=200)
     else:
