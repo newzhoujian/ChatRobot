@@ -102,6 +102,7 @@ def predict(datasets, U,
 
     rlayer0_input = Words[T.cast(rx.flatten(),dtype="int32")].reshape((rx.shape[0],rx.shape[1],Words.shape[1]))
 
+
     train_set, dev_set, test_set = datasets[0], datasets[1], datasets[2]
 
     train_set_lx = []
@@ -167,6 +168,7 @@ def predict(datasets, U,
     for i in range(max_turn):
         poolingoutput.append(pooling_layer(llayer0_input[i], rlayer0_input,
                                            q_embedding[i], r_embedding))
+
 
     session2vec = GRU(n_in=session_input_size, n_hidden=session_hidden_size, n_out=session_hidden_size)
 
@@ -336,6 +338,11 @@ def train(datasets, U,
     for i in range(max_turn):
         poolingoutput.append(pooling_layer(llayer0_input[i], rlayer0_input,
                                            q_embedding[i], r_embedding))
+
+    con_test = theano.function([index], pooling_layer(llayer0_input[0], rlayer0_input,
+                                           q_embedding[0], r_embedding), givens=dic, on_unused_input='ignore')
+    print con_test(0).shape
+    sys.exit()
 
     """
     第二次GRU，输入是poolingoutput
